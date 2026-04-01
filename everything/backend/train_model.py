@@ -18,7 +18,6 @@ def train_attrition_model(data_path):
     # Target
     df['Attrition'] = df['Attrition'].map({"Yes":1, "No":0})
 
-    # 🔥 FEATURE ENGINEERING
     df["LowIncome"] = (df["MonthlyIncome"] < 3000).astype(int)
 
     df["ExtremeStress"] = (
@@ -51,7 +50,6 @@ def train_attrition_model(data_path):
         "JobInvolvement",
         "PerformanceRating",
 
-        # 🔥 NEW FEATURES
         "LowIncome",
         "ExtremeStress",
         "LowSatisfaction",
@@ -106,7 +104,7 @@ def train_attrition_model(data_path):
         "importance": rf_model.feature_importances_
     }).sort_values("importance", ascending=False)
 
-    print("\n🔥 Top Features:\n", importances.head(10))
+    print("\n Top Features:\n", importances.head(10))
 
     # Save scaler and model separately so main.py works without changes
     scaler = pipeline.named_steps['scaler']
@@ -115,7 +113,7 @@ def train_attrition_model(data_path):
     joblib.dump(encoders, 'encoders.pkl')
     joblib.dump(selected_features, 'features.pkl')
 
-    print("\n✅ Model + files saved!")
+    print("\n Model + files saved!")
 
 if __name__ == "__main__":
     train_attrition_model("WA_Fn-UseC_-HR-Employee-Attrition.csv")
