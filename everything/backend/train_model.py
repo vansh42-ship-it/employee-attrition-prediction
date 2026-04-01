@@ -1,11 +1,12 @@
 import pandas as pd
 import numpy as np
 import joblib
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score
-from sklearn.utils import resample
+from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import Pipeline
 
 def train_attrition_model(data_path):
     print("Loading dataset...")
@@ -17,7 +18,7 @@ def train_attrition_model(data_path):
     # Target
     df['Attrition'] = df['Attrition'].map({"Yes":1, "No":0})
 
-    # 🔥 FEATURE ENGINEERING (GAME CHANGER)
+    # 🔥 FEATURE ENGINEERING
     df["LowIncome"] = (df["MonthlyIncome"] < 3000).astype(int)
 
     df["ExtremeStress"] = (
@@ -57,7 +58,7 @@ def train_attrition_model(data_path):
         "HighRiskCombo"
     ]
 
-    X = df[selected_features]
+    X = df[selected_features].copy()
     y = df['Attrition']
 
     # Encode categorical features
@@ -67,63 +68,49 @@ def train_attrition_model(data_path):
         X[col] = le.fit_transform(X[col])
         encoders[col] = le
 
-    # 🔥 BALANCE DATASET
-    df_bal = pd.concat([X, y], axis=1)
-
-    df_yes = df_bal[df_bal.Attrition == 1]
-    df_no = df_bal[df_bal.Attrition == 0]
-
-    df_yes_upsampled = resample(
-        df_yes,
-        replace=True,
-        n_samples=len(df_no),
-        random_state=42
-    )
-
-    df_balanced = pd.concat([df_no, df_yes_upsampled])
-    df_balanced = df_balanced.sample(frac=1, random_state=42)
-
-    X = df_balanced[selected_features]
-    y = df_balanced['Attrition']
-
-    print("Balanced dataset:")
-    print(y.value_counts())
-
-    # Split
+    # Split first with stratify — before any balancing
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, shuffle=True
+        X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # Scale
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
+    # Pipeline: SMOTE happens inside each CV fold — no leakage
+    pipeline = Pipeline([
+        ('smote', SMOTE(random_state=42)),
+        ('scaler', StandardScaler()),
+        ('model', RandomForestClassifier(
+            n_estimators=300,
+            max_depth=15,
+            random_state=42
+        ))
+    ])
 
-    # Train model
-    print("Training model...")
-    model = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=15,
-        class_weight="balanced",
-        random_state=42
-    )
-    model.fit(X_train, y_train)
+    # Honest cross-validation — SMOTE only sees training folds, never test folds
+    print("Running 5-Fold Cross Validation...")
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv_scores = cross_val_score(pipeline, X_train, y_train, cv=cv, scoring='roc_auc')
+    print(f"5-Fold CV AUC: {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
 
-    # Evaluate
-    y_pred = model.predict(X_test)
+    # Train final model on full training set
+    print("Training final model...")
+    pipeline.fit(X_train, y_train)
+
+    # Evaluate on held-out test set
+    y_pred = pipeline.predict(X_test)
     print("\nAccuracy:", accuracy_score(y_test, y_pred))
     print("\nClassification Report:\n", classification_report(y_test, y_pred))
 
-    # 🔥 Feature importance (for viva + explanation later)
+    # Feature importance from the RF step inside the pipeline
+    rf_model = pipeline.named_steps['model']
     importances = pd.DataFrame({
         "feature": selected_features,
-        "importance": model.feature_importances_
+        "importance": rf_model.feature_importances_
     }).sort_values("importance", ascending=False)
 
     print("\n🔥 Top Features:\n", importances.head(10))
 
-    # Save everything
-    joblib.dump(model, 'model.pkl')
+    # Save scaler and model separately so main.py works without changes
+    scaler = pipeline.named_steps['scaler']
+    joblib.dump(rf_model, 'model.pkl')
     joblib.dump(scaler, 'scaler.pkl')
     joblib.dump(encoders, 'encoders.pkl')
     joblib.dump(selected_features, 'features.pkl')
