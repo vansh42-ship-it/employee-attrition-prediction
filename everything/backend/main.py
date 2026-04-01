@@ -5,10 +5,10 @@ import numpy as np
 
 app = FastAPI()
 
-# ✅ CORS FIX (VERY IMPORTANT)
+#CORS FIX (VERY IMPORTANT)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # allow frontend (localhost:3000)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
